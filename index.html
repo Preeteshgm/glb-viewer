@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GLB Viewer</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+        }
+        
+        #container {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+        }
+        
+        #overlay {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 100;
+        }
+        
+        #fileInput {
+            display: none;
+        }
+        
+        button {
+            background-color: #4CAF50;
+            border: none;
+            color: white;
+            padding: 10px 15px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        
+        .controls {
+            margin-top: 10px;
+        }
+        
+        .control-btn {
+            background-color: #555;
+            margin-right: 5px;
+        }
+        
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background-color: rgba(0, 0, 0, 0.7);
+            color: white;
+            padding: 20px;
+            border-radius: 10px;
+            display: none;
+            z-index: 200;
+        }
+    </style>
+</head>
+<body>
+    <div id="container"></div>
+    
+    <div id="overlay">
+        <button id="openFileBtn">Open GLB File</button>
+        <input type="file" id="fileInput" accept=".glb">
+        
+        <div class="controls">
+            <button class="control-btn" id="resetBtn">Reset View</button>
+            <button class="control-btn" id="wireframeBtn">Toggle Wireframe</button>
+            <button class="control-btn" id="autoRotateBtn">Toggle Rotation</button>
+        </div>
+    </div>
+    
+    <div id="loading">Loading model, please wait...</div>
+    
+    <script type="module">
+        import * as THREE from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.module.js';
+        import { OrbitControls } from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/jsm/controls/OrbitControls.js';
+        import { GLTFLoader } from 'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/examples/jsm/loaders/GLTFLoader.js';
+        
+        // Scene setup
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x222222);
+        
+        // Camera setup
+        const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.z = 5;
+        
+        // Renderer setup
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1;
+        document.getElementById('container').appendChild(renderer.domElement);
+        
+        // Controls setup
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        
+        // Lighting
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
+        scene.add(ambientLight);
+        
+        const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+        directionalLight.position.set(1, 1, 1);
+        scene.add(directionalLight);
+        
+        const directionalLight2 = new THREE.DirectionalLight(0xffffff, 0.5);
+        directionalLight2.position.set(-1, -1, -1);
+        scene.add(directionalLight2);
+        
+        // Helpers
+        const axesHelper = new THREE.AxesHelper(5);
+        scene.add(axesHelper);
+        
+        const gridHelper = new THREE.GridHelper(10, 10);
+        scene.add(gridHelper);
+        
+        // Model variables
+        let currentModel = null;
+        let loadedObjects = [];
+        let wireframeMode = false;
+        let autoRotate = false;
+        const loadingManager = new THREE.LoadingManager();
+        const loader = new GLTFLoader(loadingManager);
+        
+        // Loading manager events
+        loadingManager.onStart = function() {
+            document.getElementById('loading').style.display = 'block';
+        };
+        
+        loadingManager.onLoad = function() {
+            document.getElementById('loading').style.display = 'none';
+        };
+        
+        // Function to load GLB model
+        function loadGLBModel(file) {
+            const reader = new FileReader();
+            
+            reader.onload = function(event) {
+                const arrayBuffer = event.target.result;
+                
+                // Clear previous model
+                if (currentModel) {
+                    loadedObjects.forEach(obj => scene.remove(obj));
+                    loadedObjects = [];
+                }
+                
+                // Load new model
+                loader.parse(arrayBuffer, '', function(gltf) {
+                    currentModel = gltf.scene;
+                    
+                    // Center model
+                    const box = new THREE.Box3().setFromObject(currentModel);
+                    const center = box.getCenter(new THREE.Vector3());
+                    const size = box.getSize(new THREE.Vector3());
+                    
+                    // Reset model position
+                    currentModel.position.x = -center.x;
+                    currentModel.position.y = -center.y;
+                    currentModel.position.z = -center.z;
+                    
+                    // Adjust camera
+                    const maxDim = Math.max(size.x, size.y, size.z);
+                    const fov = camera.fov * (Math.PI / 180);
+                    let cameraZ = Math.abs(maxDim / Math.sin(fov / 2));
+                    
+                    // Set camera position
+                    camera.position.z = cameraZ * 1.5;
+                    
+                    // Reset controls
+                    controls.reset();
+                    
+                    // Add model to scene
+                    scene.add(currentModel);
+                    loadedObjects.push(currentModel);
+                    
+                    // Set wireframe mode if active
+                    if (wireframeMode) {
+                        setWireframe(currentModel, true);
+                    }
+                    
+                }, function(error) {
+                    console.error('Error loading GLB:', error);
+                    alert('Error loading GLB file. See console for details.');
+                    document.getElementById('loading').style.display = 'none';
+                });
+            };
+            
+            reader.readAsArrayBuffer(file);
+        }
+        
+        // Function to apply wireframe to all materials
+        function setWireframe(object, wireframe) {
+            if (object.material) {
+                object.material.wireframe = wireframe;
+            }
+            
+            if (object.children && object.children.length > 0) {
+                for (let child of object.children) {
+                    setWireframe(child, wireframe);
+                }
+            }
+        }
+        
+        // Function to reset view
+        function resetView() {
+            if (currentModel) {
+                // Center model
+                const box = new THREE.Box3().setFromObject(currentModel);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                
+                // Reset model position
+                currentModel.position.x = -center.x;
+                currentModel.position.y = -center.y;
+                currentModel.position.z = -center.z;
+                
+                // Adjust camera
+                const maxDim = Math.max(size.x, size.y, size.z);
+                const fov = camera.fov * (Math.PI / 180);
+                let cameraZ = Math.abs(maxDim / Math.sin(fov / 2));
+                
+                // Set camera position
+                camera.position.set(0, 0, cameraZ * 1.5);
+                controls.reset();
+            }
+        }
+        
+        // Event Listeners
+        document.getElementById('openFileBtn').addEventListener('click', function() {
+            document.getElementById('fileInput').click();
+        });
+        
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                loadGLBModel(file);
+            }
+        });
+        
+        document.getElementById('resetBtn').addEventListener('click', resetView);
+        
+        document.getElementById('wireframeBtn').addEventListener('click', function() {
+            wireframeMode = !wireframeMode;
+            if (currentModel) {
+                setWireframe(currentModel, wireframeMode);
+            }
+        });
+        
+        document.getElementById('autoRotateBtn').addEventListener('click', function() {
+            autoRotate = !autoRotate;
+        });
+        
+        // Handle window resize
+        window.addEventListener('resize', function() {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+        
+        // Animation loop
+        function animate() {
+            requestAnimationFrame(animate);
+            
+            // Update controls
+            controls.update();
+            
+            // Auto-rotate model if enabled
+            if (autoRotate && currentModel) {
+                currentModel.rotation.y += 0.01;
+            }
+            
+            // Render scene
+            renderer.render(scene, camera);
+        }
+        
+        // Start animation loop
+        animate();
+        
+        // Drag and drop support
+        document.body.addEventListener('dragover', function(event) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = 'copy';
+        });
+        
+        document.body.addEventListener('drop', function(event) {
+            event.preventDefault();
+            
+            const file = event.dataTransfer.files[0];
+            if (file && file.name.toLowerCase().endsWith('.glb')) {
+                loadGLBModel(file);
+            } else {
+                alert('Please drop a valid GLB file.');
+            }
+        });
+    </script>
+</body>
+</html>
